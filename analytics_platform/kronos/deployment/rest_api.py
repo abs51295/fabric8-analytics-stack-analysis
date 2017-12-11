@@ -22,7 +22,7 @@ from tagging_platform.helles.npm_tagger.get_version_info_for_missing_packages im
     run_missing_package_version_collection_job
 
 
-logging.basicConfig(stream=sys.stdout, level=logging.DEBUG)
+logging.basicConfig(stream=sys.stdout, level=logging.INFO)
 
 
 def setup_logging(flask_app):
@@ -30,8 +30,8 @@ def setup_logging(flask_app):
         handler = logging.StreamHandler()
         handler.setFormatter(logging.Formatter(
             '[%(asctime)s] %(levelname)s in %(module)s: %(message)s'))
-        log_level = os.environ.get('FLASK_LOGGING_LEVEL', logging.getLevelName(logging.WARNING))
-        handler.setLevel(log_level)
+        # log_level = os.environ.get('FLASK_LOGGING_LEVEL', logging.getLevelName(logging.WARNING))
+        handler.setLevel(logging.getLevelName(logging.INFO))
         flask_app.logger.addHandler(handler)
 
 
@@ -110,7 +110,7 @@ def train_and_save_kronos():
 def predict_and_score():
     input_json = request.get_json()
 
-    app.logger.info("Analyzing the given EPV")
+    print("Analyzing the given EPV")
     app.logger.info(input_json)
 
     response = {"message": "Failed to load model, Kronos Region not available"}
@@ -122,7 +122,7 @@ def predict_and_score():
             eco_to_kronos_dependency_dict=app.eco_to_kronos_dependency_dict,
             all_package_list_obj=app.all_package_list_obj)
 
-    app.logger.info("Sending back Kronos Response")
+    print("Sending back Kronos Response")
     app.logger.info(response)
 
     return flask.jsonify(response)

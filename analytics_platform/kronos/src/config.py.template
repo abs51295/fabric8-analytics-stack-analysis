@@ -15,3 +15,5 @@ DEPLOYMENT_PREFIX = os.environ.get("DEPLOYMENT_PREFIX", "")
 
 SPARK_HOME_PATH = os.environ.get("SPARK_HOME", "")
 PY4J_VERSION = os.environ.get("PY4J_VERSION", "")
+WORKERS= os.environ.get("WORKERS", 1)
+CLASS_TYPE= os.environ.get("CLASS_TYPE", "sync")

@@ -7,6 +7,7 @@ from util.data_store.local_filesystem import LocalFileSystem
 from util.data_store.s3_data_store import S3DataStore
 import pickle
 from joblib import Parallel, delayed
+import os
 import functools
 
 
@@ -58,7 +59,7 @@ class PGMPomegranate(AbstractPGM):
         kronos_dependency_list_string = kronos_dependency_dict[
             pgm_constants.KD_PARENT_TUPLE_LIST]
         kronos_node_list = kronos_dependency_dict[pgm_constants.KD_PACKAGE_LIST] + \
-            kronos_dependency_dict[pgm_constants.KD_INTENT_LIST]
+                           kronos_dependency_dict[pgm_constants.KD_INTENT_LIST]
         # Funny construct for python3 compatability and python2 backward compatibility
         # of pomegranate.
         kronos_node_string_list = [node_name.decode('utf-8')
@@ -78,12 +79,12 @@ class PGMPomegranate(AbstractPGM):
     def score(self, evidence_dict_list):
         global pgm_model_kronos
         pgm_model_kronos = self.model
-        n_jobs = len(evidence_dict_list)
-        result_array = functools.reduce(
-            list.__add__,
-            Parallel(n_jobs=n_jobs)(
-                delayed(parallel_predict)([evidence_dict_list[i]]) for i in range(n_jobs))
-        )
+        n = len(evidence_dict_list)
+        n_jobs = int(os.environ.get("N_JOBS", 1))
+        result_array = functools.reduce(list.__add__, Parallel(n_jobs=n_jobs, verbose=51)(
+            delayed(parallel_predict)(evidence_dict_list[
+                                      int(n / float(n_jobs) * i):int(n / float(n_jobs) * (i + 1))]) for i in
+            range(n_jobs)))
         return result_array
 
 
