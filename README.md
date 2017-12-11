@@ -61,7 +61,7 @@ BODY: JSON data
 ]
 ```
 
-## Sample Response
+## Sample Request Output
 ```
 [
     {
