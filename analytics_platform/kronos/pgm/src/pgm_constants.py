@@ -11,6 +11,7 @@ KD_PACKAGE_NAME = "package_name"
 KD_SIMILARITY_SCORE = "similarity_score"
 KD_PACKAGE_TO_TOPIC_MAP = "package_to_topic_dict"
 KD_TOPIC_LIST = "topic_list"
+KD_PACKAGE_FREQUENCY = "data_outlier_manifest_file/element_frequency.json"
 
 KD_OUTPUT_FOLDER = "data_kronos_dependency"
 COM_OUTPUT_FOLDER = "data_co_occurrence_matrix"

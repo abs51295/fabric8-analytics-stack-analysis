@@ -1,4 +1,6 @@
 import os
+from collections import defaultdict
+
 import analytics_platform.kronos.pgm.src.pgm_constants as pgm_constants
 from analytics_platform.kronos.pgm.src.pgm_pomegranate import PGMPomegranate
 from util.pgm_util import generate_evidence_map_from_transaction_list
@@ -49,6 +51,15 @@ def load_user_eco_to_kronos_model_dict_s3(bucket_name, additional_path):
     return user_eco_to_kronos_model_dict
 
 
+def load_package_frequency_dict_s3(bucket_name, additional_path):
+    input_data_store = S3DataStore(src_bucket_name=bucket_name,
+                                   access_key=config.AWS_S3_ACCESS_KEY_ID,
+                                   secret_key=config.AWS_S3_SECRET_ACCESS_KEY)
+    package_frequency_dict = input_data_store.read_json_file(
+        os.path.join(additional_path, pgm_constants.KD_PACKAGE_FREQUENCY))
+    return package_frequency_dict
+
+
 def get_sorted_companion_package_probabilities(res, node_list, non_companion_packages):
     result = get_sorted_companion_node_probabilities(
         res, node_list, non_companion_packages)
@@ -58,6 +69,15 @@ def get_sorted_companion_package_probabilities(res, node_list, non_companion_pac
 def get_sorted_companion_intent_probabilities(res, node_list):
     result = get_sorted_companion_node_probabilities(res, node_list)
     return result
+
+
+def get_topics_for_manifest(manifest, package_topic_dict):
+    manifest_topics = set()
+    for package in manifest:
+        package_topics = package_topic_dict.get(package)
+        if package_topics is not None:
+            manifest_topics = manifest_topics.union(package_topics)
+    return manifest_topics
 
 
 def get_sorted_companion_node_probabilities(res, node_list, non_companion_packages=None):
@@ -107,19 +127,48 @@ def get_companion_package_dict(result, package_list, non_companion_packages):
     return package_result_dict
 
 
-def generated_evidence_dict_list_and_potential_outlier_index_list(observed_package_list, node_list):
+def generated_evidence_dict_list_and_potential_outlier_index_list(observed_package_list, node_list,
+                                                                  all_package_list_obj, package_to_topic_dict):
     evidence_dict_list = list()
     potential_outlier_index_list = list()
-    for i in range(len(observed_package_list)):
-        temp_list = list(observed_package_list)
-        node = observed_package_list[i]
-        potential_outlier_index_list.append(node_list.index(node))
-        temp_list.pop(i)
-        temp_evidence_list = generate_evidence_map_from_transaction_list(
-            temp_list)
-        evidence_dict_list.append(temp_evidence_list)
+    observed_package_list_length = len(observed_package_list)
     evidence_dict_list.append(
         generate_evidence_map_from_transaction_list(observed_package_list))
+
+    package_intersection_score_to_manifest_dict = defaultdict(list)
+    topic_intersection_score_to_manifest_dict = defaultdict(list)
+
+    max_package_intersection_set_length = -1
+
+    for package_set in all_package_list_obj.get_all_list_of_package_set():
+        # print("package_set", package_set)
+        intersection_set_length = len(package_set.intersection(observed_package_list))
+        max_package_intersection_set_length = max(max_package_intersection_set_length, intersection_set_length)
+        if intersection_set_length == observed_package_list_length:
+            return evidence_dict_list, potential_outlier_index_list
+        else:
+            package_intersection_score_to_manifest_dict[intersection_set_length].append(package_set)
+
+    observed_package_list_topics = get_topics_for_manifest(observed_package_list, package_to_topic_dict)
+    max_topic_intersection_set_length = -1
+
+    for package_set in package_intersection_score_to_manifest_dict[max_package_intersection_set_length]:
+        package_set_topics = get_topics_for_manifest(package_set, package_to_topic_dict)
+        topic_intersection_set_length = len(observed_package_list_topics.intersection(package_set_topics))
+        max_topic_intersection_set_length = max(max_topic_intersection_set_length,
+                                                topic_intersection_set_length)
+        topic_intersection_score_to_manifest_dict[topic_intersection_set_length].append(package_set)
+
+    max_package_set_occupancy = -1
+    matching_package_set = set()
+
+    for package_set in topic_intersection_score_to_manifest_dict[max_topic_intersection_set_length]:
+        package_set_occupancy = max_package_intersection_set_length / len(package_set)
+        if package_set_occupancy >= max_package_set_occupancy:
+            max_package_set_occupancy = package_set_occupancy
+            matching_package_set = package_set
+
+    potential_outlier_index_list = [package for package in observed_package_list if package not in matching_package_set]
     return evidence_dict_list, potential_outlier_index_list
 
 
@@ -130,34 +179,30 @@ def get_clean_topics_for_package(package_to_topic_dict, package):
 
 
 def get_kronos_recommendation(kronos, observed_package_list, node_list, outlier_threshold,
-                              package_to_topic_dict, outlier_package_count_threshold):
+                              package_to_topic_dict, outlier_package_count_threshold,
+                              all_package_list_obj, package_frequency_dict):
     evidence_dict_list, potential_outlier_index_list = \
         generated_evidence_dict_list_and_potential_outlier_index_list(
-            observed_package_list, node_list)
+            observed_package_list, node_list, all_package_list_obj, package_to_topic_dict)
 
     result_array = kronos.score(evidence_dict_list=evidence_dict_list)
     outlier_dict_list = list()
     companion_recommendation_dict = result_array[-1]
 
     for i in range(0, len(potential_outlier_index_list)):
-        outlier_result = result_array[i][potential_outlier_index_list[i]]
-        outlier_score = outlier_result.values()[0]
-        if outlier_score > outlier_threshold:
-            outlier_dict = dict()
-            outlier_dict[pgm_constants.KRONOS_OUTLIER_PACKAGE_NAME] = observed_package_list[i]
-            outlier_dict[pgm_constants.KRONOS_OUTLIER_PROBABILITY] = outlier_score
-            outlier_dict[pgm_constants.KD_TOPIC_LIST] = \
-                get_clean_topics_for_package(package_to_topic_dict, observed_package_list[i])
-            outlier_dict_list.append(outlier_dict)
+        outlier_dict = dict()
+        outlier_dict[pgm_constants.KRONOS_OUTLIER_PACKAGE_NAME] = potential_outlier_index_list[i]
+        outlier_dict[pgm_constants.KRONOS_OUTLIER_PROBABILITY] = int(package_frequency_dict.get(potential_outlier_index_list[i], 0))
+        outlier_dict[pgm_constants.KD_TOPIC_LIST] = \
+            get_clean_topics_for_package(package_to_topic_dict, potential_outlier_index_list[i])
+        outlier_dict_list.append(outlier_dict)
     sorted_outlier_dict_list = sorted(outlier_dict_list,
-                                      key=lambda x: x[pgm_constants.KRONOS_OUTLIER_PROBABILITY],
-                                      reverse=True)
+                                      key=lambda x: x[pgm_constants.KRONOS_OUTLIER_PROBABILITY])
     num_outlier_packages = len(sorted_outlier_dict_list)
     if num_outlier_packages > outlier_package_count_threshold:
         num_outlier_packages = outlier_package_count_threshold
     sorted_outlier_dict_list_pruned = sorted_outlier_dict_list[
                                       :num_outlier_packages]
-
     return companion_recommendation_dict, sorted_outlier_dict_list_pruned
 
 
@@ -189,7 +234,8 @@ def get_observed_and_missing_package_list(requested_package_set, unknown_package
 
 def score_kronos(kronos, requested_package_set, kronos_dependency, comp_package_count_threshold,
                  alt_package_count_threshold, outlier_probability_threshold,
-                 unknown_package_ratio_threshold, outlier_package_count_threshold):
+                 unknown_package_ratio_threshold, outlier_package_count_threshold,
+                 all_package_list_obj, package_frequency_dict):
     package_list = kronos_dependency.get(pgm_constants.KD_PACKAGE_LIST)
     intent_list = kronos_dependency.get(pgm_constants.KD_INTENT_LIST)
     node_list = package_list + intent_list
@@ -217,7 +263,7 @@ def score_kronos(kronos, requested_package_set, kronos_dependency, comp_package_
 
         companion_recommendation_dict, outlier_package_dict_list = get_kronos_recommendation(
             kronos, observed_package_list, node_list, outlier_probability_threshold,
-            package_to_topic_dict, outlier_package_count_threshold)
+            package_to_topic_dict, outlier_package_count_threshold, all_package_list_obj, package_frequency_dict)
 
         companion_package_dict_list = get_companion_package_dict(
             result=companion_recommendation_dict,
@@ -272,7 +318,7 @@ def get_alternate_packages_for_packages(similar_package_dict, package_names,
 
 
 def score_eco_user_package_dict(user_request, user_eco_kronos_dict, eco_to_kronos_dependency_dict,
-                                all_package_list_obj):
+                                all_package_list_obj, package_frequency_dict):
     request_json_list = list(user_request)
 
     response_json_list = list()
@@ -312,7 +358,9 @@ def score_eco_user_package_dict(user_request, user_eco_kronos_dict, eco_to_krono
             alt_package_count_threshold=alt_package_count_threshold,
             outlier_probability_threshold=outlier_probability_threshold,
             unknown_package_ratio_threshold=unknown_package_ratio_threshold,
-            outlier_package_count_threshold=outlier_package_count_threshold)
+            outlier_package_count_threshold=outlier_package_count_threshold,
+            all_package_list_obj=all_package_list_obj,
+            package_frequency_dict=package_frequency_dict)
         prediction_result_dict[pgm_constants.KRONOS_SCORE_USER_PERSONA] = user_category
         prediction_result_dict[pgm_constants.KRONOS_SCORE_ECOSYSTEM] = ecosystem
 

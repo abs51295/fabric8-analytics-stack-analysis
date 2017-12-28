@@ -219,3 +219,6 @@ class RecommendationValidator(object):
 
     def get_all_list_package_length(self):
         return self.manifest_len
+
+    def get_all_list_of_package_set(self):
+        return self.all_list_of_package_set
