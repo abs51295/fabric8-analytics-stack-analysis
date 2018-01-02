@@ -81,6 +81,7 @@ class PGMPomegranate(AbstractPGM):
         global pgm_model_kronos
         pgm_model_kronos = self.model
         n_jobs = len(evidence_dict_list)
+        print("n_jobs", n_jobs)
         result_array = functools.reduce(
             list.__add__,
             Parallel(n_jobs=n_jobs, verbose=51)(
